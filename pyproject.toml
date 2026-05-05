@@ -1,0 +1,49 @@
+[project]
+name = "opencode-buddy"
+version = "0.5.0"
+description = "Scaffolder de projetos OpenCode com proxy LiteLLM (DeepSeek + Kimi + ChatGPT OAuth)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["opencode", "litellm", "ai", "cli", "scaffolder", "deepseek", "kimi"]
+authors = [{ name = "Rodrigo Siliunas", email = "rodrigo.siliunas12@gmail.com" }]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Utilities",
+]
+dependencies = [
+  "typer>=0.12",
+  "pyyaml>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/RodrigoSiliunas/opencode-buddy"
+Repository = "https://github.com/RodrigoSiliunas/opencode-buddy"
+Issues = "https://github.com/RodrigoSiliunas/opencode-buddy/issues"
+Changelog = "https://github.com/RodrigoSiliunas/opencode-buddy/blob/main/CHANGELOG.md"
+
+[project.scripts]
+opencode-buddy = "opencode_buddy.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opencode_buddy"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/opencode_buddy/templates" = "opencode_buddy/templates"
+"src/opencode_buddy/model_registry.yaml" = "opencode_buddy/model_registry.yaml"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+]
