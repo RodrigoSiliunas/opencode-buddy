@@ -39,4 +39,35 @@ jobs:
           test -f "$RUNNER_TEMP/smoke-project/opencode.json"
           test -f "$RUNNER_TEMP/smoke-project/litellm-config.yaml"
           test -f "$RUNNER_TEMP/smoke-project/.env.example"
+          test -f "$RUNNER_TEMP/smoke-project/.gitignore"
+          grep -qE '^\.env$' "$RUNNER_TEMP/smoke-project/.gitignore"
+          grep -qE '^!\.env\.example$' "$RUNNER_TEMP/smoke-project/.gitignore"
+          test -f "$RUNNER_TEMP/smoke-project/.opencode/project.md"
           test -f "$RUNNER_TEMP/smoke-project/.opencode/agents/orchestrator.md"
+          uv run opencode-buddy validate "$RUNNER_TEMP/smoke-project"
+
+      - name: Smoke keys validate
+        shell: bash
+        run: |
+          uv run opencode-buddy keys validate --json > "$RUNNER_TEMP/keys.json"
+          uv run python -c "import json,sys; data=json.load(open(sys.argv[1])); assert isinstance(data, list) and data, 'empty payload'; assert all('provider_key' in s and 'state' in s for s in data)" "$RUNNER_TEMP/keys.json"
+
+      - name: Build wheel
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        shell: bash
+        run: |
+          uv build --wheel
+          ls -la dist/
+          # Confere que registry YAML e templates entraram no wheel.
+          uv run python -m zipfile -l dist/opencode_buddy-*.whl | tee "$RUNNER_TEMP/wheel-list.txt"
+          grep -q "opencode_buddy/model_registry.yaml" "$RUNNER_TEMP/wheel-list.txt"
+          grep -q "opencode_buddy/templates/default.md" "$RUNNER_TEMP/wheel-list.txt"
+          grep -q "opencode_buddy/templates/orchestrator.md" "$RUNNER_TEMP/wheel-list.txt"
+
+      - name: Smoke install wheel
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        shell: bash
+        run: |
+          uv tool install dist/opencode_buddy-*.whl
+          opencode-buddy --help
+          opencode-buddy doctor || true   # doctor pode falhar (sem CLI opencode no runner)

@@ -1,0 +1,74 @@
+# Exemplo documentado de como adicionar um novo provider/modelo ao
+# `src/opencode_buddy/model_registry.yaml`. Este arquivo NAO e carregado pelo
+# codigo - serve so como referencia. Copie/adapte os blocos para o registry
+# real quando for adicionar um provider novo.
+#
+# Convencoes:
+#   - `transport`: hoje e sempre "API". OAuth fica em `oauth_providers`.
+#   - `discovery.kind`:
+#       openai-compatible : usa POST /chat/completions e GET /models. Default seguro.
+#       deepseek          : adapter dedicado (autoriza via Bearer + endpoint /models).
+#       anthropic         : adapter nativo (header x-api-key + anthropic-version).
+#       gemini            : adapter nativo Generative Language API.
+#       none              : sem listagem live (usar so sugestoes do registry).
+#   - `litellm_prefix`: prefixo aplicado ao model_id quando `litellm_model` nao
+#     e fornecido explicitamente. Ex: `openai/<id>`, `deepseek/<id>`,
+#     `anthropic/<id>`, `gemini/<id>`.
+#   - `recommended_for`: papeis que devem priorizar o provider (build, frontend,
+#     backend, audio, video, default, deep). O wizard e o planner usam isso
+#     para escolha automatica.
+#   - `cost_label`: rotulo livre (`low`, `medium`, `medium-high`, `plan`,
+#     `unknown`, etc).
+#
+# IMPORTANTE: o Agent Driven Mode (planner LLM) suporta apenas:
+#   deepseek, moonshot, opencode-go, commandcode (OpenAI-compatible)
+#   anthropic, gemini (adapters nativos)
+# Outros providers funcionam para `keys validate` e para o wizard, mas nao
+# como planner ate ganharem adapter dedicado.
+
+version: 1
+
+providers:
+  # 1) Provider OpenAI-compatible "fictext" via api_base proprio.
+  - key: fictext
+    name: FicText
+    transport: API
+    api_key_env: FICTEXT_API_KEY
+    api_base: https://api.fictext.dev/v1
+    litellm_prefix: openai
+    discovery:
+      kind: openai-compatible
+    cost_label: low
+    recommended_for: [default]
+    models:
+      - id: fictext-fast
+        recommended_for: [build, default]
+      - id: fictext-pro
+        recommended_for: [deep]
+
+  # 2) Provider OpenAI-compatible cujo endpoint vem de env (ex: self-hosted).
+  - key: selfllm
+    name: Self-hosted vLLM
+    transport: API
+    api_key_env: SELFLLM_API_KEY
+    api_base_env: SELFLLM_API_BASE   # operador define em runtime
+    litellm_prefix: openai
+    discovery:
+      kind: openai-compatible
+    cost_label: unknown
+    recommended_for: [build, default, backend]
+    # Sem `models`: o registry aceita providers sem modelos pre-listados;
+    # o `keys validate` ainda lista os modelos via /models.
+
+oauth_providers:
+  # 3) OAuth provider detectado via `opencode auth list`.
+  - key: github-copilot
+    name: GitHub Copilot
+    detect:
+      kind: opencode-auth-list
+      match: github
+    models:
+      - id: copilot-chat
+        litellm_model: github-copilot/copilot-chat
+        cost_label: included
+        recommended_for: [build, frontend, default]

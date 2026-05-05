@@ -1,0 +1,115 @@
+# Registry declarativo de providers e modelos do OpenCode Buddy.
+#
+# Editar este arquivo permite adicionar/atualizar modelos sem mexer em codigo Python.
+# Convencoes:
+#   - transport: API ou OAuth (OAuth fica em oauth_providers).
+#   - discovery.kind: openai-compatible | deepseek | anthropic | gemini | none.
+#   - litellm_prefix: prefixo aplicado ao model_id quando litellm_model nao e fornecido.
+#   - recommended_for: papeis que devem priorizar o modelo (build, frontend, backend, audio, video, default, deep).
+#   - cost_label: rotulo livre (low, medium, plan, unknown, etc).
+#
+version: 1
+
+providers:
+  - key: opencode-go
+    name: OpenCode Go
+    transport: API
+    api_key_env: OPENCODE_GO_API_KEY
+    api_base: https://opencode.ai/zen/go/v1
+    litellm_prefix: openai
+    discovery:
+      kind: openai-compatible
+    cost_label: plan
+    recommended_for: [build, frontend, default]
+    models:
+      - id: deepseek-v4-flash
+        recommended_for: [build, default]
+      - id: kimi-k2.6
+        recommended_for: [frontend]
+      - id: qwen3.6-plus
+        recommended_for: [deep]
+
+  - key: deepseek
+    name: DeepSeek
+    transport: API
+    api_key_env: DEEPSEEK_API_KEY
+    litellm_prefix: deepseek
+    discovery:
+      kind: deepseek
+    cost_label: low
+    recommended_for: [build, backend, default, deep]
+    models:
+      - id: deepseek-chat
+        recommended_for: [build, backend, default]
+      - id: deepseek-reasoner
+        recommended_for: [deep]
+
+  - key: moonshot
+    name: Moonshot/Kimi
+    transport: API
+    api_key_env: MOONSHOT_API_KEY
+    api_base: https://api.moonshot.ai/v1
+    litellm_prefix: moonshot
+    discovery:
+      kind: openai-compatible
+    cost_label: medium
+    recommended_for: [frontend, default]
+    models:
+      - id: kimi-k2
+        recommended_for: [frontend, default]
+
+  - key: anthropic
+    name: Anthropic
+    transport: API
+    api_key_env: ANTHROPIC_API_KEY
+    litellm_prefix: anthropic
+    discovery:
+      kind: anthropic
+    cost_label: medium-high
+    recommended_for: [backend, deep]
+    models:
+      - id: claude-sonnet-4-5
+        recommended_for: [backend, deep]
+      - id: claude-haiku-4-5
+        recommended_for: [default]
+
+  - key: gemini
+    name: Google Gemini
+    transport: API
+    api_key_env: GEMINI_API_KEY
+    litellm_prefix: gemini
+    discovery:
+      kind: gemini
+    cost_label: low-medium
+    recommended_for: [audio, video, backend, deep]
+    models:
+      - id: gemini-2.5-pro
+        recommended_for: [deep, backend, video]
+      - id: gemini-2.5-flash
+        recommended_for: [audio, video, default]
+
+  - key: commandcode
+    name: CommandCode
+    transport: API
+    api_key_env: COMMANDCODE_API_KEY
+    api_base_env: COMMANDCODE_API_BASE
+    litellm_prefix: openai
+    discovery:
+      kind: openai-compatible
+    cost_label: unknown
+    recommended_for: [backend, default]
+    models:
+      - id: commandcode-model
+        recommended_for: [backend, default]
+
+oauth_providers:
+  - key: chatgpt
+    name: ChatGPT OAuth
+    detect:
+      kind: opencode-auth-list
+      match: chatgpt
+    models:
+      - id: gpt-5.5
+        litellm_model: chatgpt/gpt-5.5
+        cost_label: included/plan
+        recommended_for: [backend, deep, audio, video]

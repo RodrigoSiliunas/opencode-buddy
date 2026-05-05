@@ -1,0 +1,73 @@
+# Spec declarativo de exemplo. Use com:
+#   opencode-buddy init . --spec examples/opencode-buddy.spec.yaml
+#
+# Flags do init ainda têm precedência sobre os valores aqui.
+# Campos não listados pegam default do registry
+# (src/opencode_buddy/model_registry.yaml).
+
+litellm_url: http://localhost:4000/v1
+litellm_port: 4000
+routing_strategy: simple-shuffle
+
+# Modelos por papel — usam aliases do litellm-config.yaml ou prefixo chatgpt/
+backend_model: chatgpt/gpt-5.5
+frontend_model: litellm/kimi
+default_model: litellm/deepseek-fast
+deep_model: litellm/deepseek-pro
+build_model: litellm/deepseek-fast
+
+drop_params:
+  - reasoningSummary
+
+# Agents extras alem dos defaults (build/frontend/backend/default/deep)
+extra_agents:
+  - name: reviewer
+    description: Revisao critica de codigo antes de merge
+    model: litellm/deepseek-pro
+    prompt_file: reviewer.md
+
+# Regras de fallback no router do LiteLLM (alias -> [aliases de fallback])
+fallback_rules:
+  - alias: deepseek-pro
+    fallbacks:
+      - deepseek-fast
+
+# Contexto rico que vai pra .opencode/project.md e e lido pelos agents
+project_context:
+  preset: custom
+  stack: Frontend + Backend + ML
+  summary: Aplicacao web com pipeline de inferencia LLM e dashboards.
+  capabilities:
+    - key: frontend
+      label: Frontend/UI
+      answers:
+        - [framework, React]
+        - [typescript, Sim]
+        - [styling, Tailwind]
+    - key: backend
+      label: Backend/API
+      answers:
+        - [runtime, Python]
+        - [database, Postgres]
+        - [auth, JWT]
+    - key: ml
+      label: Machine Learning
+      answers:
+        - [framework, PyTorch]
+        - [serving, FastAPI]
+  role_models:
+    - [frontend/UI, "OpenCode Go - kimi-k2.6"]
+    - [backend/API, "ChatGPT OAuth - gpt-5.5"]
+    - [ml/inference, "DeepSeek - deepseek-reasoner"]
+  commands:
+    - uv run pytest
+    - uv run ruff check .
+  conventions:
+    - Priorizar mudancas pequenas e testaveis.
+    - Nunca incluir secrets no repositorio.
+  constraints:
+    - .env nunca deve ser commitado.
+    - Sem chamadas externas em codigo de teste.
+  risks:
+    - Custos estimados sao indicativos, nao precos exatos.
+    - Catalogos de modelo podem mudar sem aviso do provedor.
