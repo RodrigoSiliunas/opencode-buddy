@@ -22,6 +22,7 @@ O OpenCode Buddy gera um workspace OpenCode pronto para usar com agents, modelos
 - `opencode-buddy init <pasta>`: modo direto/scriptável, com flags ou `--spec`.
 - `opencode-buddy create`: wizard interativo estilo Vite, com capacidades e subperguntas.
 - `opencode-buddy agent-driven`: planner por IA ou heurística determinística, com scan do projeto, plano revisável e scaffold só após aprovação.
+- `opencode-buddy keys setup/validate`: setup guiado de `.env` e validação real das chaves/modelos disponíveis.
 
 - `opencode.json` com agents conforme as capacidades do projeto + agent orquestrador que delega automaticamente
 - `litellm-config.yaml` com aliases por papel e providers escolhidos no wizard
@@ -87,6 +88,13 @@ Projeto novo com wizard:
 opencode-buddy create meu-app
 ```
 
+O `create` prepara o `.env` do projeto e valida pelo menos uma chave API antes de consultar modelos live. Para preparar chaves sem criar scaffold, use:
+
+```bash
+opencode-buddy keys setup --cwd meu-app
+opencode-buddy keys validate --cwd meu-app
+```
+
 Projeto existente com plano automático, sem chamar LLM:
 
 ```bash
@@ -113,7 +121,7 @@ O wizard pergunta a pasta e quais capacidades o projeto inclui. As capacidades s
 
 Para cada capacidade selecionada, o wizard faz subperguntas objetivas (framework, runtime, banco, auth, etc) e usa as respostas para preencher o `.opencode/project.md`, que vira fonte de verdade para os agents.
 
-Quando existem chaves no ambiente ou em um `.env` local, o wizard pode consultar os modelos disponíveis dos providers. Se a consulta falhar ou nenhuma chave existir, ele mostra sugestões locais e marca quais chaves faltam.
+Antes de escolher modelos, o wizard procura chaves no ambiente e no `.env` da pasta do projeto. Se nenhuma chave API válida existir, ele oferece criar/atualizar o `.env` e valida a chave na hora. Isso garante que a lista de modelos venha do provider real sempre que possível. Use `--no-setup-keys` para recusar o setup guiado; nesse caso o `create` falha se não houver provider API válido.
 
 Providers disponíveis no wizard:
 
@@ -135,13 +143,13 @@ opencode-buddy create meu-app
 
 ```bash
 mkdir meu-projeto && cd meu-projeto
-opencode-buddy init .
-cp .env.example .env
-# editar .env com chaves reais
+opencode-buddy init . --setup-keys
 opencode-buddy validate .      # confere arquivos, modelos, prompts e .env
 .\start-proxy.ps1            # terminal A — sobe LiteLLM
 opencode                     # terminal B — abre OpenCode
 ```
+
+`init .` continua funcionando sem chaves para scaffolds scriptáveis. Use `--setup-keys` quando quiser criar/atualizar `.env` de forma guiada, ou `--validate-keys` quando a pasta já tiver `.env` e você só quiser validar os providers.
 
 Dentro do OpenCode, agent `build` (default) classifica seu pedido e delega:
 
@@ -177,6 +185,9 @@ opencode-buddy init <pasta>
   --backend-model chatgpt/gpt-5.5
   --routing-strategy simple-shuffle
   --extra-agent nome=modelo[:descrição]     # adiciona agent customizado
+  --setup-keys                          # cria/atualiza .env e valida chaves depois do scaffold
+  --validate-keys                       # valida chaves existentes depois do scaffold
+  --keys-timeout 10                     # timeout por provider durante setup/validacao
   --force                               # sobrescreve arquivos existentes
 ```
 
@@ -223,7 +234,9 @@ Planners suportados (live):
 | `anthropic` | Adapter nativo `/v1/messages` (`x-api-key` + `anthropic-version`) | `ANTHROPIC_API_KEY` |
 | `gemini` | Adapter nativo `generateContent` (`x-goog-api-key`) | `GEMINI_API_KEY` |
 
-Auto-pick (`--planner=auto`): tenta OpenAI-compatible primeiro, depois Anthropic, depois Gemini. Sem chaves disponíveis, cai no determinístico.
+Auto-pick (`--planner=auto`): tenta OpenAI-compatible primeiro, depois Anthropic, depois Gemini. Em modo live, o comando exige pelo menos uma chave API válida na pasta usada como contexto (`--scan`, `--target` ou pasta atual). Se não encontrar, ele oferece setup guiado; em `--dry-run --json`, falha com erro limpo para não abrir prompt. Use `--offline` para forçar o planner determinístico sem chaves e sem rede.
+
+Use `--planner-timeout <segundos>` quando o provider live demorar para responder. O padrão é `90`; isso evita fallback prematuro em planners com prompt grande, como OpenCode Go. Use `--keys-timeout <segundos>` para ajustar a validação/listagem inicial de modelos.
 
 Modos de saída:
 
@@ -239,7 +252,7 @@ Restrições de segurança:
 - O scanner ignora `.git`, `node_modules`, `.venv`, `dist`, `build`, caches; nunca lê `.env` ou arquivos do tipo `*.key`/`*.pem`/`*credential*`.
 - O payload enviado ao LLM contém apenas **nomes** de variáveis de ambiente detectadas (ex: `DEEPSEEK_API_KEY`), nunca os valores. A chave vai apenas em headers (`Authorization` no OpenAI-compatible, `x-api-key` no Anthropic, `x-goog-api-key` no Gemini). Gemini **não** usa `?key=...` na URL.
 - `--json` nunca inclui `raw_response` (debug interno). Output público é construído via `plan_to_jsonable_public(plan, include_raw=False)`.
-- Sem chaves detectadas, o planner determinístico gera spec **válido** preenchido pelos defaults do registry com risco visível pedindo `.env`.
+- Em `--offline`, o planner determinístico gera spec **válido** preenchido pelos defaults do registry mesmo sem chaves, com risco visível pedindo `.env`.
 - JSON malformado / HTTP error / schema inválido cai automaticamente no determinístico com aviso visível em stderr; nada é escrito antes da aprovação.
 
 Exemplos prontos em [`examples/`](examples/):
@@ -260,7 +273,17 @@ O comando valida se `opencode.json` e `litellm-config.yaml` fazem parse, se os p
 
 Em modo `--strict`, qualquer aviso vira erro (exit 1). Em particular, **`--strict` falha quando o arquivo `.env` ainda não existe** (apenas `.env.example` está presente) — esse é o caso típico logo após `init`/`create`. Use `--strict` em CI para garantir que o operador já criou e preencheu o `.env` real, e use sem `--strict` durante o setup local.
 
-### Validar chaves de provider (`keys validate`)
+### Configurar e validar chaves de provider
+
+```bash
+opencode-buddy keys setup --cwd .
+opencode-buddy keys setup --cwd . --provider opencode-go --provider deepseek
+opencode-buddy keys validate --cwd .
+```
+
+`keys setup` cria/atualiza `.env`, pergunta as chaves com input oculto e valida os providers selecionados sem imprimir valores. Sem `--provider`, ele prioriza OpenCode Go e DeepSeek e permite configurar os demais providers em seguida.
+
+`keys validate` só diagnostica o que já existe no ambiente ou no `.env` da pasta indicada:
 
 ```bash
 opencode-buddy keys validate
@@ -361,6 +384,7 @@ OpenCode Buddy generates a ready-to-use OpenCode workspace with agents, per-role
 - `opencode-buddy init <folder>`: direct/scriptable mode, with flags or `--spec`.
 - `opencode-buddy create`: Vite-like interactive wizard with capabilities and sub-questions.
 - `opencode-buddy agent-driven`: AI or deterministic planner, project scan, reviewable plan, and scaffold only after approval.
+- `opencode-buddy keys setup/validate`: guided `.env` setup plus real key/model validation.
 
 - `opencode.json` with agents generated from project capabilities + an orchestrator agent that auto-delegates
 - `litellm-config.yaml` with aliases per role, selected providers and fallback rules when configured
@@ -419,6 +443,13 @@ New project with the wizard:
 opencode-buddy create my-app
 ```
 
+`create` prepares the target `.env` and validates at least one API key before querying live model catalogs. To set keys up without scaffolding, run:
+
+```bash
+opencode-buddy keys setup --cwd my-app
+opencode-buddy keys validate --cwd my-app
+```
+
 Existing project with an automatic plan and no LLM call:
 
 ```bash
@@ -445,19 +476,19 @@ The wizard asks for a folder and which capabilities the project includes. Capabi
 
 For each selected capability the wizard asks objective sub-questions (framework, runtime, database, auth, etc.) and the answers feed `.opencode/project.md`, which agents treat as the source of truth.
 
-When API keys are available in the environment or a local `.env`, the wizard can query provider model catalogs. If discovery fails or no keys exist yet, it shows local suggestions and marks the missing keys. It also detects ChatGPT OAuth through `opencode auth list` when available.
+Before model selection, the wizard checks the environment and the target project's `.env`. If no valid API key exists, it offers to create/update `.env` and validates the key immediately. This keeps model choices tied to the provider's live catalog whenever possible. Use `--no-setup-keys` to refuse guided setup; in that case `create` exits if no valid API provider is available. It also detects ChatGPT OAuth through `opencode auth list` when available.
 
 ### Direct Use
 
 ```bash
 mkdir my-project && cd my-project
-opencode-buddy init .
-cp .env.example .env
-# fill in keys
+opencode-buddy init . --setup-keys
 opencode-buddy validate .
 .\start-proxy.ps1            # terminal A — start LiteLLM
 opencode                     # terminal B — open OpenCode
 ```
+
+`init .` still works without keys for scriptable scaffolds. Use `--setup-keys` to create/update `.env` interactively, or `--validate-keys` when the folder already has `.env` and you only want provider diagnostics.
 
 Inside OpenCode, the `build` agent (default) classifies your prompt and delegates. Force a specific agent with `/agent <name>` before the prompt.
 
@@ -478,7 +509,17 @@ opencode-buddy validate . --strict
 
 `--strict` turns warnings into exit 1. Note: **`--strict` fails when `.env` is missing** (only `.env.example` present), which is the normal state right after `init`/`create`. Use `--strict` in CI to assert the operator filled in `.env`; skip it during local setup.
 
-### Validate provider keys (`keys validate`)
+### Set up and validate provider keys
+
+```bash
+opencode-buddy keys setup --cwd .
+opencode-buddy keys setup --cwd . --provider opencode-go --provider deepseek
+opencode-buddy keys validate --cwd .
+```
+
+`keys setup` creates/updates `.env`, prompts secrets with hidden input, and validates selected providers without echoing values. With no `--provider`, it prioritizes OpenCode Go and DeepSeek and then lets you configure the remaining providers.
+
+`keys validate` only diagnoses what already exists in the environment or in the selected folder's `.env`:
 
 ```bash
 opencode-buddy keys validate
@@ -518,7 +559,9 @@ Supported live planners:
 | `anthropic` | Native adapter `/v1/messages` (`x-api-key` + `anthropic-version`) | `ANTHROPIC_API_KEY` |
 | `gemini` | Native adapter `generateContent` (`x-goog-api-key` header) | `GEMINI_API_KEY` |
 
-Auto-pick (`--planner=auto`): OpenAI-compatible first, then Anthropic, then Gemini. No keys → deterministic.
+Auto-pick (`--planner=auto`): OpenAI-compatible first, then Anthropic, then Gemini. In live mode, the command requires at least one valid API key in the context folder (`--scan`, `--target`, or the current directory). If none is found, it offers guided setup; in `--dry-run --json`, it exits cleanly instead of prompting. Use `--offline` to force the deterministic planner without keys or network.
+
+Use `--planner-timeout <seconds>` when a live provider is slow to respond. The default is `90`; this avoids premature fallback on larger planner prompts, including OpenCode Go. Use `--keys-timeout <seconds>` to tune the initial key validation/model listing.
 
 Output modes:
 
@@ -534,7 +577,7 @@ Security guarantees:
 - The scanner skips `.git`, `node_modules`, `.venv`, `dist`, `build`, caches; it never reads `.env` or `*.key`/`*.pem`/`*credential*` files.
 - The payload sent to the LLM contains only **names** of detected env vars, never their values. The actual key flows only through headers (`Authorization`, `x-api-key`, or `x-goog-api-key`). Gemini **never** receives the key via the URL `?key=` query string.
 - `--json` never includes `raw_response` (internal debug). Public output goes through `plan_to_jsonable_public(plan, include_raw=False)`.
-- With no keys detected, the deterministic planner still produces a **valid** spec from the registry defaults plus a visible risk asking for `.env`.
+- In `--offline`, the deterministic planner still produces a **valid** spec from the registry defaults even without keys, plus a visible risk asking for `.env`.
 - Malformed JSON / HTTP errors / schema violations automatically fall back to the deterministic planner with a visible warning to stderr; nothing is written before approval.
 
 Examples in [`examples/`](examples/):

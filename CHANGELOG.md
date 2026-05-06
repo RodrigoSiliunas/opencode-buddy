@@ -6,6 +6,13 @@ seguindo [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Unreleased]
 
+### Added (Keys setup flow)
+- Novo comando `opencode-buddy keys setup`: cria/atualiza `.env`, pergunta segredos com input oculto, valida providers selecionados e nunca imprime valores de chave.
+- `init` ganhou `--setup-keys`, `--validate-keys` e `--keys-timeout`, mantendo o fluxo scriptavel sem chaves como default.
+- `create` agora prepara/valida o `.env` da pasta destino antes de escolher modelos live. Use `--no-setup-keys` para recusar o setup guiado; sem provider API valido, o comando falha em vez de montar catalogo dinamico incompleto.
+- `agent-driven` agora usa `.env` de `--scan`, `--target` ou pasta atual, exige provider API valido no modo live e preserva `--offline` como caminho deterministico sem rede. `--dry-run --json` falha de forma limpa quando faltam chaves para evitar prompts em automacao.
+- Testes de integracao para `keys setup`, `init --setup-keys`, preflight live do `agent-driven` e resolucao de `.env` por target.
+
 ### Added (Agent Driven Mode — Refinements Round)
 - **Adapter nativo Anthropic** (`AnthropicPlannerClient`): chama `POST /v1/messages` com headers `x-api-key` + `anthropic-version: 2023-06-01`. `ANTHROPIC_API_KEY` agora é planner válido (`--planner=anthropic` ou auto-pick).
 - **Adapter nativo Gemini** (`GeminiPlannerClient`): chama `generateContent` com header `x-goog-api-key`. `GEMINI_API_KEY` agora é planner válido. **API key não vai pela URL** (`?key=...`); só por header.
@@ -25,6 +32,11 @@ seguindo [SemVer](https://semver.org/lang/pt-BR/).
 - `select_planner` agora aceita `--planner=anthropic`/`--planner=gemini`. Auto-pick: OpenAI-compatible primeiro (deepseek > moonshot > opencode-go > commandcode), depois Anthropic > Gemini. Sem chave + provider explícito → erro amigável apontando a env esperada.
 - `_parse_plan_payload` faz validação estrita via `validate_plan_payload`; payload off-schema vira `PlannerError` e dispara fallback automático.
 - README pt+en atualizado (planners suportados, `--dry-run --json`, links para `examples/`).
+
+### Fixed
+- Descoberta de modelos e planners live agora enviam `User-Agent`/`Accept`, evitando bloqueio WAF/Cloudflare 1010 em endpoints como OpenCode Go.
+- `agent-driven` ganhou `--planner-timeout` (default `90s`) para evitar fallback prematuro em prompts grandes.
+- `build_model_catalog({})` agora respeita ambiente explicitamente vazio em vez de carregar `.env` local.
 
 ### Added
 - **Agent Driven Mode** (`opencode-buddy agent-driven`): comando novo que vasculha um projeto local (ou conversa em modo "novo projeto"), pede a um LLM planner que proponha capacidades, agents, modelos por papel, riscos e comandos, exibe o plano em estilo "plan mode" e só executa `scaffold_project` ao aprovar. Suporta `--scan`, `--target`, `--planner`, `--offline`, `--objective`, `--force`. Scanner ignora `.git`/`node_modules`/`.venv`/`dist`/`build`/caches e nunca lê `.env` ou arquivos sensíveis (`*.key`/`*.pem`/`*credential*`).

@@ -1,8 +1,15 @@
 import json
+from unittest.mock import MagicMock
 
 import pytest
 from typer.testing import CliRunner
 
+from opencode_buddy.agent_driven import (
+    AgentDrivenDecision,
+    AgentDrivenModelChoice,
+    AgentDrivenPlan,
+    DeterministicPlannerClient,
+)
 from opencode_buddy.cli import app
 from opencode_buddy.config_builder import (
     InitOptions,
@@ -13,9 +20,18 @@ from opencode_buddy.config_builder import (
     build_start_proxy_script,
     iter_agent_specs,
 )
+from opencode_buddy.keys_validator import ProviderStatus
 
 
 runner = CliRunner()
+
+
+def _http_response(payload: dict) -> MagicMock:
+    response = MagicMock()
+    response.read.return_value = json.dumps(payload).encode("utf-8")
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+    return response
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +96,47 @@ def test_keys_validate_known_provider_runs_normally(tmp_path):
     assert len(payload) == 1
     assert payload[0]["provider_key"] == "deepseek"
     assert payload[0]["state"] == "missing-env"
+
+
+def test_keys_setup_writes_env_and_does_not_echo_secret(tmp_path, monkeypatch):
+    secret = "super-secret-opencode-go"
+    monkeypatch.setattr(
+        "opencode_buddy.model_catalog.urllib.request.urlopen",
+        lambda req, timeout=None: _http_response({"data": [{"id": "deepseek-v4-flash"}]}),
+    )
+
+    result = runner.invoke(
+        app,
+        ["keys", "setup", "--cwd", str(tmp_path), "--provider", "opencode-go"],
+        input=f"{secret}\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert f"OPENCODE_GO_API_KEY={secret}" in (tmp_path / ".env").read_text(encoding="utf-8")
+    assert secret not in result.stdout
+    assert secret not in result.stderr
+    assert "OpenCode Go" in result.stdout
+
+
+def test_init_setup_keys_creates_env_after_scaffold(tmp_path, monkeypatch):
+    secret = "init-secret-opencode-go"
+    target = tmp_path / "init-with-keys"
+    monkeypatch.setattr(
+        "opencode_buddy.model_catalog.urllib.request.urlopen",
+        lambda req, timeout=None: _http_response({"data": [{"id": "deepseek-v4-flash"}]}),
+    )
+
+    result = runner.invoke(
+        app,
+        ["init", str(target), "--setup-keys", "--force"],
+        input=f"s\n{secret}\nn\nn\nn\nn\nn\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (target / "opencode.json").exists()
+    assert f"OPENCODE_GO_API_KEY={secret}" in (target / ".env").read_text(encoding="utf-8")
+    assert secret not in result.stdout
+    assert secret not in result.stderr
 
 
 def test_validate_strict_fails_when_env_missing(tmp_path):
@@ -182,6 +239,7 @@ def test_agent_driven_command_anthropic_without_key_friendly_error(tmp_path):
             "--planner",
             "anthropic",
         ],
+        input="n\n",
     )
     assert result.exit_code == 2
     combined = result.stdout + result.stderr
@@ -211,6 +269,81 @@ def test_agent_driven_dry_run_json_offline_emits_json_and_writes_no_files(tmp_pa
     assert "model_choices" in payload
     assert "raw_response" not in payload
     assert not (target / "opencode.json").exists()
+
+
+def test_agent_driven_requires_live_key_unless_offline(tmp_path):
+    project = _make_minimal_react_project(tmp_path / "src-project")
+    target = tmp_path / "out-live-required"
+    result = runner.invoke(
+        app,
+        [
+            "agent-driven",
+            "--scan",
+            str(project),
+            "--target",
+            str(target),
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2
+    combined = result.stdout + result.stderr
+    assert "Nenhum provider API valido" in combined or "No providers" in combined
+    assert not (target / "opencode.json").exists()
+
+
+def test_agent_driven_new_project_uses_target_env_for_live_preflight(tmp_path, monkeypatch):
+    target = tmp_path / "new-project"
+    target.mkdir()
+    (target / ".env").write_text("OPENCODE_GO_API_KEY=target-secret\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_validate(cwd, *, provider_keys=(), timeout=5.0):
+        captured["cwd"] = cwd
+        return (
+            ProviderStatus(
+                "opencode-go",
+                "OpenCode Go",
+                "API",
+                "ok",
+                "1 modelo encontrado",
+                ("deepseek-v4-flash",),
+            ),
+        )
+
+    plan = AgentDrivenPlan(
+        target_path=str(target),
+        decisions=(AgentDrivenDecision("frontend", True, reason="teste"),),
+        model_choices=(
+            AgentDrivenModelChoice("build", "opencode-go", "deepseek-v4-flash", "litellm/build-model"),
+            AgentDrivenModelChoice("frontend", "opencode-go", "kimi-k2.6", "litellm/frontend-model"),
+            AgentDrivenModelChoice("default", "opencode-go", "deepseek-v4-flash", "litellm/default-model"),
+            AgentDrivenModelChoice("deep", "opencode-go", "qwen3.6-plus", "litellm/deep-model"),
+        ),
+    )
+    planner = DeterministicPlannerClient()
+
+    monkeypatch.setattr("opencode_buddy.cli.validate_selected_providers", fake_validate)
+    monkeypatch.setattr("opencode_buddy.cli.select_planner", lambda *args, **kwargs: planner)
+    monkeypatch.setattr("opencode_buddy.cli.propose_plan_with_fallback", lambda *args, **kwargs: (plan, planner))
+
+    result = runner.invoke(
+        app,
+        [
+            "agent-driven",
+            "--target",
+            str(target),
+            "--objective",
+            "novo app",
+            "--dry-run",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["cwd"] == target.resolve()
+    assert json.loads(result.stdout)["target_path"] == str(target)
 
 
 def test_agent_driven_json_without_dry_run_returns_friendly_error(tmp_path):

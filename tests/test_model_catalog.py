@@ -1,6 +1,7 @@
+import json
 from unittest.mock import patch
 
-from opencode_buddy.model_catalog import build_model_catalog, choices_for_role
+from opencode_buddy.model_catalog import _request_json, build_model_catalog, choices_for_role
 from opencode_buddy.registry import ModelEntry, ProviderEntry, Registry
 
 
@@ -58,3 +59,36 @@ def test_catalog_picks_up_fake_provider_injected_via_registry(monkeypatch):
     monkeypatch.setattr("opencode_buddy.model_catalog.load_registry", lambda: fake_registry)
     catalog = build_model_catalog({"FAKECO_API_KEY": "x"}, live=False)
     assert any(model.provider == "FakeCo" and model.model_id == "fake-1" for model in catalog.models)
+
+
+def test_request_json_sends_user_agent_and_preserves_auth_header():
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps({"ok": True}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return Response()
+
+    with patch("opencode_buddy.model_catalog.urllib.request.urlopen", side_effect=fake_urlopen):
+        payload = _request_json(
+            "https://opencode.ai/zen/go/v1/models",
+            headers={"Authorization": "Bearer test-key"},
+            timeout=12,
+        )
+
+    request = captured["request"]
+    assert payload == {"ok": True}
+    assert captured["timeout"] == 12
+    assert request.get_header("User-agent").startswith("opencode-buddy/")
+    assert request.get_header("Accept") == "application/json"
+    assert request.get_header("Authorization") == "Bearer test-key"

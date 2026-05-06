@@ -498,6 +498,10 @@ def test_litellm_planner_parses_valid_json_response(monkeypatch):
 
     assert plan.target_path == "./from-llm"
     assert any(c.role == "build" for c in plan.model_choices)
+    headers_lower = {k.lower(): v for k, v in captured["headers"].items()}
+    assert headers_lower["user-agent"].startswith("opencode-buddy/")
+    assert headers_lower["accept"] == "application/json"
+    assert headers_lower["authorization"] == "Bearer secret-key-value"
 
 
 def test_litellm_planner_raises_on_http_500(monkeypatch):
@@ -650,6 +654,8 @@ def test_anthropic_planner_parses_text_response_with_json(monkeypatch):
     headers_lower = {k.lower(): v for k, v in captured["headers"].items()}
     assert headers_lower.get("anthropic-version") == "2023-06-01"
     assert "x-api-key" in headers_lower
+    assert headers_lower["user-agent"].startswith("opencode-buddy/")
+    assert headers_lower["accept"] == "application/json"
     assert captured["url"].endswith("/v1/messages")
 
 
@@ -760,6 +766,8 @@ def test_gemini_planner_parses_candidates_response(monkeypatch):
     assert "key=" not in captured["url"], "Gemini API key nao deve aparecer na URL"
     headers_lower = {k.lower(): v for k, v in captured["headers"].items()}
     assert "x-goog-api-key" in headers_lower
+    assert headers_lower["user-agent"].startswith("opencode-buddy/")
+    assert headers_lower["accept"] == "application/json"
 
 
 def test_gemini_planner_raises_on_http_500(monkeypatch):
