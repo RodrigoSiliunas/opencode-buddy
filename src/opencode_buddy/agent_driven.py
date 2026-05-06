@@ -7,9 +7,9 @@ ProjectSpec valido para `scaffold_project`.
 
 Restricoes:
 - Nao envia conteudo de .env. Apenas NOMES de env vars detectadas.
-- Live LLM client suporta apenas providers genuinamente OpenAI-compatible
-  (deepseek/moonshot/opencode-go/commandcode com COMMANDCODE_API_BASE).
-  Anthropic/Gemini sao rejeitados antes da requisicao.
+- Live LLM client suporta providers OpenAI-compatible
+  (deepseek/moonshot/opencode-go/commandcode com COMMANDCODE_API_BASE)
+  e adapters nativos para Anthropic/Gemini.
 - Sem rede no DeterministicPlannerClient.
 - plan_to_project_spec reconstroi ModelSpec via registry, ignora texto livre
   do LLM em campos como api_key_env/api_base/litellm_model.
@@ -41,6 +41,7 @@ from opencode_buddy.config_builder import (
     default_conventions,
     default_risks,
 )
+from opencode_buddy.model_catalog import DEFAULT_HTTP_HEADERS
 from opencode_buddy.project_scanner import ProjectScan
 from opencode_buddy.registry import (
     ModelEntry,
@@ -89,6 +90,7 @@ ANTHROPIC_MAX_TOKENS = 4096
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com"
 GEMINI_API_VERSION = "v1beta"
+DEFAULT_PLANNER_TIMEOUT = 90.0
 
 ROLES: tuple[str, ...] = ("build", "frontend", "backend", "audio", "video", "default", "deep")
 
@@ -604,7 +606,7 @@ def select_planner(
     *,
     prefer: str | None = None,
     offline: bool = False,
-    timeout: float = 30.0,
+    timeout: float = DEFAULT_PLANNER_TIMEOUT,
 ) -> PlannerClient:
     if offline:
         return DeterministicPlannerClient()
@@ -690,7 +692,7 @@ class LiteLLMPlannerClient:
         provider: ProviderEntry,
         model_id: str,
         env: dict[str, str],
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_PLANNER_TIMEOUT,
     ) -> None:
         if provider.key not in LIVE_OPENAI_COMPATIBLE_PROVIDERS:
             raise PlannerError(
@@ -755,9 +757,9 @@ class LiteLLMPlannerClient:
             url,
             data=encoded,
             headers={
+                **DEFAULT_HTTP_HEADERS,
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
-                "Accept": "application/json",
             },
             method="POST",
         )
@@ -797,7 +799,9 @@ class _NativeHTTPClientBase:
 
     def _post_json(self, url: str, *, headers: dict[str, str], body: dict, timeout: float) -> dict:
         encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(url, data=encoded, headers=headers, method="POST")
+        merged_headers = dict(DEFAULT_HTTP_HEADERS)
+        merged_headers.update(headers)
+        req = urllib.request.Request(url, data=encoded, headers=merged_headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 raw = response.read().decode("utf-8")
@@ -827,7 +831,7 @@ class AnthropicPlannerClient(_NativeHTTPClientBase):
         provider: ProviderEntry,
         model_id: str,
         env: dict[str, str],
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_PLANNER_TIMEOUT,
     ) -> None:
         if provider.key != "anthropic":
             raise PlannerError(
@@ -874,8 +878,7 @@ class AnthropicPlannerClient(_NativeHTTPClientBase):
         headers = {
             "x-api-key": self._api_key,
             "anthropic-version": ANTHROPIC_API_VERSION,
-            "content-type": "application/json",
-            "accept": "application/json",
+            "Content-Type": "application/json",
         }
         payload = self._post_json(url, headers=headers, body=body, timeout=self._timeout)
         try:
@@ -907,7 +910,7 @@ class GeminiPlannerClient(_NativeHTTPClientBase):
         provider: ProviderEntry,
         model_id: str,
         env: dict[str, str],
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_PLANNER_TIMEOUT,
     ) -> None:
         if provider.key != "gemini":
             raise PlannerError(
@@ -955,8 +958,7 @@ class GeminiPlannerClient(_NativeHTTPClientBase):
         }
         headers = {
             "x-goog-api-key": self._api_key,
-            "content-type": "application/json",
-            "accept": "application/json",
+            "Content-Type": "application/json",
         }
         payload = self._post_json(url, headers=headers, body=body, timeout=self._timeout)
         try:

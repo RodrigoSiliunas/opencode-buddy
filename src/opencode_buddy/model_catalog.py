@@ -10,6 +10,12 @@ from typing import Any
 
 from opencode_buddy.registry import OAuthProviderEntry, ProviderEntry, load_registry
 
+HTTP_USER_AGENT = "opencode-buddy/0.5.0 (+https://github.com/RodrigoSiliunas/opencode-buddy)"
+DEFAULT_HTTP_HEADERS = {
+    "User-Agent": HTTP_USER_AGENT,
+    "Accept": "application/json",
+}
+
 
 @dataclass(frozen=True)
 class AvailableModel:
@@ -58,7 +64,7 @@ def load_env_sources(cwd: Path | None = None) -> dict[str, str]:
 
 
 def build_model_catalog(env: dict[str, str] | None = None, *, live: bool = False) -> CatalogResult:
-    env = env or load_env_sources()
+    env = load_env_sources() if env is None else env
     registry = load_registry()
     known = known_env_vars()
     detected = tuple(sorted(name for name in known if env.get(name)))
@@ -249,7 +255,9 @@ class HTTPDiscoveryError(RuntimeError):
 
 
 def _request_json(url: str, *, headers: dict[str, str] | None = None, timeout: float = 5.0) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers=headers or {})
+    merged_headers = dict(DEFAULT_HTTP_HEADERS)
+    merged_headers.update(headers or {})
+    request = urllib.request.Request(url, headers=merged_headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))

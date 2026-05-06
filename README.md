@@ -225,6 +225,8 @@ Planners suportados (live):
 
 Auto-pick (`--planner=auto`): tenta OpenAI-compatible primeiro, depois Anthropic, depois Gemini. Sem chaves disponíveis, cai no determinístico.
 
+Use `--planner-timeout <segundos>` quando o provider live demorar para responder. O padrão é `90`; isso evita fallback prematuro em planners com prompt grande, como OpenCode Go.
+
 Modos de saída:
 
 - **default**: review interativo + scaffold após aprovação.
@@ -519,6 +521,8 @@ Supported live planners:
 | `gemini` | Native adapter `generateContent` (`x-goog-api-key` header) | `GEMINI_API_KEY` |
 
 Auto-pick (`--planner=auto`): OpenAI-compatible first, then Anthropic, then Gemini. No keys → deterministic.
+
+Use `--planner-timeout <seconds>` when a live provider is slow to respond. The default is `90`; this avoids premature fallback on larger planner prompts, including OpenCode Go.
 
 Output modes:
 

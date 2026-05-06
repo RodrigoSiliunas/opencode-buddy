@@ -26,6 +26,11 @@ seguindo [SemVer](https://semver.org/lang/pt-BR/).
 - `_parse_plan_payload` faz validação estrita via `validate_plan_payload`; payload off-schema vira `PlannerError` e dispara fallback automático.
 - README pt+en atualizado (planners suportados, `--dry-run --json`, links para `examples/`).
 
+### Fixed
+- Descoberta de modelos e planners live agora enviam `User-Agent`/`Accept`, evitando bloqueio WAF/Cloudflare 1010 em endpoints como OpenCode Go.
+- `agent-driven` ganhou `--planner-timeout` (default `90s`) para evitar fallback prematuro em prompts grandes.
+- `build_model_catalog({})` agora respeita ambiente explicitamente vazio em vez de carregar `.env` local.
+
 ### Added
 - **Agent Driven Mode** (`opencode-buddy agent-driven`): comando novo que vasculha um projeto local (ou conversa em modo "novo projeto"), pede a um LLM planner que proponha capacidades, agents, modelos por papel, riscos e comandos, exibe o plano em estilo "plan mode" e só executa `scaffold_project` ao aprovar. Suporta `--scan`, `--target`, `--planner`, `--offline`, `--objective`, `--force`. Scanner ignora `.git`/`node_modules`/`.venv`/`dist`/`build`/caches e nunca lê `.env` ou arquivos sensíveis (`*.key`/`*.pem`/`*credential*`).
 - `src/opencode_buddy/project_scanner.py`: walk com skip-list, classificação de arquivos (package_manager, framework_config, ci, iac, doc, test, container, env_example), extração de signals (`framework`, `js_frameworks`, `python_libs`, `bundler`, `containerized`, `multimodal_hints`, etc).

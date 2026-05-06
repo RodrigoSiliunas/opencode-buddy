@@ -30,6 +30,7 @@ from opencode_buddy.keys_validator import (
 )
 from opencode_buddy.agent_driven import (
     AgentDrivenRequest,
+    DEFAULT_PLANNER_TIMEOUT,
     DeterministicPlannerClient,
     LIVE_SUPPORTED_PROVIDERS,
     PlannerError,
@@ -399,6 +400,11 @@ def agent_driven(
         "--json",
         help="Saida JSON do plano (para automacao). Exige --dry-run.",
     ),
+    planner_timeout: float = typer.Option(
+        DEFAULT_PLANNER_TIMEOUT,
+        "--planner-timeout",
+        help="Timeout em segundos para a chamada live do planner LLM.",
+    ),
 ) -> None:
     """Modo Agent Driven: LLM (ou heuristica determinista) propoe ProjectSpec + revisao + scaffold."""
 
@@ -424,6 +430,7 @@ def agent_driven(
             env,
             prefer=None if planner == "auto" else planner,
             offline=offline,
+            timeout=planner_timeout,
         )
     except PlannerError as exc:
         typer.secho(t("agent_driven.planner.error", error=str(exc)), fg=typer.colors.RED, err=True)
