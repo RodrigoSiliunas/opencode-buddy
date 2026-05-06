@@ -1,6 +1,8 @@
 import re
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable
 
 import typer
 
@@ -382,7 +384,11 @@ def print_create_banner() -> None:
     typer.secho("OpenCode Buddy create", fg=typer.colors.CYAN, bold=True)
 
 
-def run_create_wizard(default_path: str | None = None) -> tuple[str, InitOptions]:
+def run_create_wizard(
+    default_path: str | None = None,
+    *,
+    prepare_env: Callable[[str], dict[str, str]] | None = None,
+) -> tuple[str, InitOptions]:
     print_create_banner()
     typer.secho("Vamos montar o projeto em poucos passos.\n", fg=typer.colors.WHITE, bold=True)
 
@@ -390,7 +396,7 @@ def run_create_wizard(default_path: str | None = None) -> tuple[str, InitOptions
     selected_capabilities = _ask_capabilities()
     capability_answers = _ask_subquestions(selected_capabilities)
 
-    env = load_env_sources()
+    env = prepare_env(target) if prepare_env is not None else load_env_sources(Path(target).resolve())
     detected = tuple(name for name in sorted(env) if name.endswith("_API_KEY") and env.get(name))
     if detected:
         typer.echo("")

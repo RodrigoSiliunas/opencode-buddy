@@ -28,6 +28,11 @@ from opencode_buddy.keys_validator import (
     has_failures,
     validate_providers,
 )
+from opencode_buddy.key_setup import (
+    has_ok_api_provider,
+    run_key_setup_interactive,
+    validate_selected_providers,
+)
 from opencode_buddy.agent_driven import (
     AgentDrivenRequest,
     DEFAULT_PLANNER_TIMEOUT,
@@ -262,6 +267,129 @@ def _build_init_spec(
         raise SpecFileError(f"campos invalidos no spec: {exc}") from exc
 
 
+def _confirm_pt(label: str, default: bool = True) -> bool:
+    suffix = t("confirm.yes_default") if default else t("confirm.no_default")
+    yes_words = {"s", "sim", "y", "yes"}
+    no_words = {"n", "nao", "não", "no"}
+    while True:
+        raw = typer.prompt(f"{label} {suffix}", default="", show_default=False).strip().lower()
+        if not raw:
+            return default
+        if raw in yes_words:
+            return True
+        if raw in no_words:
+            return False
+        typer.secho(t("confirm.invalid"), fg=typer.colors.RED)
+
+
+def _validate_keys_for_cwd(
+    cwd: Path,
+    *,
+    provider_keys: tuple[str, ...] = (),
+    timeout: float = 5.0,
+) -> tuple[ProviderStatus, ...]:
+    try:
+        return validate_selected_providers(cwd.resolve(), provider_keys=provider_keys, timeout=timeout)
+    except UnknownProviderError as exc:
+        typer.secho(
+            t("keys.unknown_provider", provider=exc.key),
+            fg=typer.colors.RED,
+            err=True,
+        )
+        typer.secho(
+            t("keys.unknown_provider.available", available=", ".join(exc.available)),
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        raise typer.Exit(2) from exc
+    except ValueError as exc:
+        typer.secho(f"[ERRO] {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
+
+
+def _run_keys_setup(
+    cwd: Path,
+    *,
+    provider_keys: tuple[str, ...] = (),
+    overwrite: bool = False,
+    timeout: float = 5.0,
+) -> tuple[ProviderStatus, ...]:
+    try:
+        result = run_key_setup_interactive(
+            cwd.resolve(),
+            provider_keys=provider_keys,
+            overwrite=overwrite,
+            timeout=timeout,
+        )
+    except ValueError as exc:
+        typer.secho(f"[ERRO] {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
+
+    if result.statuses:
+        typer.echo(_format_keys_report(result.statuses))
+    return result.statuses
+
+
+def _ensure_live_keys_or_exit(
+    cwd: Path,
+    *,
+    provider_keys: tuple[str, ...] = (),
+    timeout: float = 5.0,
+    allow_prompt: bool = True,
+    json_mode: bool = False,
+) -> dict[str, str]:
+    cwd = cwd.resolve()
+    cwd.mkdir(parents=True, exist_ok=True)
+
+    statuses = _validate_keys_for_cwd(cwd, provider_keys=provider_keys, timeout=timeout)
+    if has_ok_api_provider(statuses):
+        return load_env_sources(cwd)
+
+    if not json_mode:
+        typer.echo(_format_keys_report(statuses))
+
+    provider_hint = ", ".join(provider_keys) if provider_keys else "OpenCode Go/DeepSeek/etc."
+    if allow_prompt and not json_mode:
+        should_setup = _confirm_pt(
+            f"Nenhuma chave API valida foi encontrada em {cwd}. Configurar {provider_hint} agora?",
+            default=True,
+        )
+        if should_setup:
+            statuses = _run_keys_setup(
+                cwd,
+                provider_keys=provider_keys,
+                overwrite=False,
+                timeout=timeout,
+            )
+            if has_ok_api_provider(statuses):
+                return load_env_sources(cwd)
+
+    typer.secho(
+        (
+            "[ERRO] Nenhum provider API valido disponivel. "
+            "Configure um .env nesta pasta com `opencode-buddy keys setup --cwd .`, "
+            "ou rode `opencode-buddy keys validate --cwd .` para diagnosticar."
+        ),
+        fg=typer.colors.RED,
+        err=True,
+    )
+    raise typer.Exit(2)
+
+
+def _planner_provider_or_exit(planner: str) -> str | None:
+    if planner == "auto":
+        return None
+    if planner not in LIVE_SUPPORTED_PROVIDERS:
+        available = ", ".join(("auto",) + LIVE_SUPPORTED_PROVIDERS)
+        typer.secho(
+            t("agent_driven.planner.error", error=f"provider '{planner}' nao suportado. Use: {available}"),
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
+    return planner
+
+
 @app.command()
 def init(
     path: Path = typer.Argument(Path("."), help="Diretorio destino do projeto"),
@@ -285,6 +413,21 @@ def init(
         None,
         "--extra-agent",
         help="Adiciona agent customizado: nome=modelo[:descricao]. Ex: reviewer=litellm/deepseek-pro:Revisao de codigo",
+    ),
+    setup_keys: bool = typer.Option(
+        False,
+        "--setup-keys",
+        help="Depois do scaffold, cria/atualiza .env com chaves de provider e valida.",
+    ),
+    validate_keys: bool = typer.Option(
+        False,
+        "--validate-keys",
+        help="Depois do scaffold, valida as chaves do .env/ambiente da pasta destino.",
+    ),
+    keys_timeout: float = typer.Option(
+        5.0,
+        "--keys-timeout",
+        help="Timeout em segundos por provider durante setup/validacao de chaves.",
     ),
     force: bool = typer.Option(False, "--force", help="Sobrescreve arquivos existentes"),
 ) -> None:
@@ -327,15 +470,44 @@ def init(
         typer.secho(f"[ERRO] {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
 
+    target_path = path.resolve()
+    if setup_keys:
+        statuses = _run_keys_setup(target_path, timeout=keys_timeout)
+        if has_failures(statuses, strict=False):
+            raise typer.Exit(1)
+    elif validate_keys:
+        statuses = _validate_keys_for_cwd(target_path, timeout=keys_timeout)
+        typer.echo(_format_keys_report(statuses))
+        if has_failures(statuses, strict=False):
+            raise typer.Exit(1)
+
 
 @app.command()
 def create(
     path: Path | None = typer.Argument(None, help="Diretorio destino do projeto"),
+    setup_keys: bool = typer.Option(
+        True,
+        "--setup-keys/--no-setup-keys",
+        help="Antes de escolher modelos, garante pelo menos uma chave API valida no .env do projeto.",
+    ),
+    keys_timeout: float = typer.Option(
+        5.0,
+        "--keys-timeout",
+        help="Timeout em segundos por provider durante validacao de chaves.",
+    ),
     force: bool = typer.Option(False, "--force", help="Sobrescreve arquivos existentes"),
 ) -> None:
     """Wizard interativo estilo Vite para criar um projeto OpenCode customizado."""
 
-    target_text, project_spec = run_create_wizard(str(path) if path else None)
+    def prepare_env(target_text: str) -> dict[str, str]:
+        target_path = Path(target_text).resolve()
+        return _ensure_live_keys_or_exit(
+            target_path,
+            timeout=keys_timeout,
+            allow_prompt=setup_keys,
+        )
+
+    target_text, project_spec = run_create_wizard(str(path) if path else None, prepare_env=prepare_env)
     try:
         scaffold_project(Path(target_text).resolve(), project_spec, force)
     except ValueError as exc:
@@ -405,6 +577,11 @@ def agent_driven(
         "--planner-timeout",
         help="Timeout em segundos para a chamada live do planner LLM.",
     ),
+    keys_timeout: float = typer.Option(
+        5.0,
+        "--keys-timeout",
+        help="Timeout em segundos por provider durante validacao de chaves.",
+    ),
 ) -> None:
     """Modo Agent Driven: LLM (ou heuristica determinista) propoe ProjectSpec + revisao + scaffold."""
 
@@ -422,8 +599,18 @@ def agent_driven(
     def info(message: str, *, color: str | None = None, bold: bool = False) -> None:
         typer.secho(message, fg=color, bold=bold, err=info_err)
 
-    cwd_for_env = scan if scan else Path.cwd()
-    env = load_env_sources(cwd_for_env)
+    cwd_for_env = (scan if scan is not None else target if target is not None else Path.cwd()).resolve()
+    explicit_provider = None if offline else _planner_provider_or_exit(planner)
+    if offline:
+        env = load_env_sources(cwd_for_env)
+    else:
+        env = _ensure_live_keys_or_exit(
+            cwd_for_env,
+            provider_keys=(explicit_provider,) if explicit_provider else (),
+            timeout=keys_timeout,
+            allow_prompt=not (json_out and dry_run),
+            json_mode=json_out and dry_run,
+        )
 
     try:
         client = select_planner(
@@ -585,6 +772,29 @@ def keys_validate(
 
     if has_failures(statuses, strict=strict):
         sys.exit(1)
+
+
+@keys_app.command("setup")
+def keys_setup(
+    cwd: Path = typer.Option(Path("."), "--cwd", help="Diretorio onde criar/atualizar .env"),
+    provider: list[str] | None = typer.Option(
+        None,
+        "--provider",
+        help="Provider a configurar (pode repetir). Ex: --provider opencode-go --provider deepseek",
+    ),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Pergunta e permite substituir chaves existentes"),
+    timeout: float = typer.Option(5.0, "--timeout", help="Timeout em segundos por requisicao HTTP"),
+) -> None:
+    """Cria/atualiza .env com chaves de provider sem vazar valores no terminal."""
+
+    statuses = _run_keys_setup(
+        cwd.resolve(),
+        provider_keys=tuple(provider or ()),
+        overwrite=overwrite,
+        timeout=timeout,
+    )
+    if has_failures(statuses, strict=False):
+        raise typer.Exit(1)
 
 
 _STATE_TAG_KEYS: dict[str, tuple[str, str]] = {
